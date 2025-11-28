@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/berkkaradalan/GoCore/database"
+	"github.com/berkkaradalan/CoreGo/database"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 

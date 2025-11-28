@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/berkkaradalan/GoCore/auth"
-	gocore "github.com/berkkaradalan/GoCore"
+	"github.com/berkkaradalan/CoreGo/auth"
+	corego "github.com/berkkaradalan/CoreGo"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,7 +23,7 @@ func main() {
 	// Initialize CoreGo
 	// MongoDB will auto-load from .env (MONGODB_CONNECTION_URL)
 	// We only need to provide Auth config
-	core, err := gocore.New(&gocore.Config{
+	core, err := corego.New(&corego.Config{
 		// Mongo: nil means use MONGODB_CONNECTION_URL from .env
 		Auth: &auth.Config{
 			Secret:       getEnv("AUTH_SECRET", "super-secret-key-for-testing"),

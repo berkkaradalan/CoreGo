@@ -1,9 +1,9 @@
-package gocore
+package corego
 
 import (
-	"github.com/berkkaradalan/GoCore/auth"
-	"github.com/berkkaradalan/GoCore/database"
-	"github.com/berkkaradalan/GoCore/env"
+	"github.com/berkkaradalan/CoreGo/auth"
+	"github.com/berkkaradalan/CoreGo/database"
+	"github.com/berkkaradalan/CoreGo/env"
 )
 
 type Config struct {

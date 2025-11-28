@@ -29,7 +29,7 @@ func NewMongoDB(config *MongoConfig) (*MongoDB, error) {
 	}
 
 	if config.Database == "" {
-		config.Database = "gocore"
+		config.Database = "corego"
 	}
 
 	return &MongoDB{
