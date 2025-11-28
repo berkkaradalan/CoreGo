@@ -2,6 +2,9 @@
 
 A comprehensive backend framework for Go that provides production-ready authentication, multi-database support, and environment management through a unified API. Framework-agnostic and built for developer experience.
 
+![image search api](https://berkkdev.com/corego.png)
+
+
 ## Features
 
 - **🔐 Authentication System**: Built-in JWT authentication with user management
