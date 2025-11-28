@@ -1,6 +1,6 @@
 module github.com/berkkaradalan/CoreGo
 
-go 1.24.1
+go 1.21
 
 require (
 	github.com/gin-gonic/gin v1.11.0
