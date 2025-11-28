@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"time"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -48,13 +49,22 @@ func (m *MongoDB) Disconnect() error {
 	return m.client.Disconnect(ctx)
 }
 
-func (m *MongoDB) InsertOne(collection string, document any) error {
+func (m *MongoDB) InsertOne(collection string, document any) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	db := m.client.Database(m.config.Database)
-	_, err := db.Collection(collection).InsertOne(ctx, document)
-	return err
+	result, err := db.Collection(collection).InsertOne(ctx, document)
+	if err != nil {
+		return "", err
+	}
+
+	// Convert inserted ID to string
+	if oid, ok := result.InsertedID.(primitive.ObjectID); ok {
+		return oid.Hex(), nil
+	}
+
+	return "", nil
 }
 
 func (m *MongoDB) FindOne(collection string, filter any, result any) error {
@@ -99,4 +109,27 @@ func (m *MongoDB) UpdateMany(collection string, filter, update any) error {
 	db := m.client.Database(m.config.Database)
 	_, err := db.Collection(collection).UpdateMany(ctx, filter, update)
 	return err
+}
+
+func (m *MongoDB) Find(collection string, filter any) ([]map[string]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	db := m.client.Database(m.config.Database)
+	cursor, err := db.Collection(collection).Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var results []map[string]any
+	if err = cursor.All(ctx, &results); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func (m *MongoDB) Collection(name string) *mongo.Collection {
+	return m.client.Database(m.config.Database).Collection(name)
 }
