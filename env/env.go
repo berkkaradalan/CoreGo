@@ -10,6 +10,7 @@ type Env struct {
 	URL							string `mapstructure:"URL"`
 	PORT						string `mapstructure:"PORT"`
 	MONGODB_CONNECTION_URL		*string `mapstructure:"MONGODB_CONNECTION_URL"`
+	POSTGRES_CONNECTION_URL		*string `mapstructure:"POSTGRES_CONNECTION_URL"`
 	MANUAL 						map[string]string
 }
 
