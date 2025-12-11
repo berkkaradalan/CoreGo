@@ -7,13 +7,15 @@ import (
 )
 
 type Config struct {
-	Mongo *database.MongoConfig
-	Auth  *auth.Config
+	Mongo 		*database.MongoConfig
+	Postgres 	*database.PostgresConfig
+	Auth  		*auth.Config
 }
 
 type Core struct {
 	Env 		*env.Env
 	Mongo		*database.MongoDB
+	Postgres	*database.PostgresDB
 	Auth		*auth.Manager
 }
 
@@ -40,6 +42,22 @@ func New(config *Config) (*Core, error){
 			return nil, err
 		}
 		core.Mongo = mongo
+	}
+
+	if config.Postgres != nil {
+		postgres, err := database.NewPostgresDB(config.Postgres)
+		if err != nil {
+			return nil, err
+		}
+		core.Postgres = postgres
+	} else if core.Env.POSTGRES_CONNECTION_URL != nil {
+		postgres, err := database.NewPostgresDB(&database.PostgresConfig{
+			URL: *core.Env.POSTGRES_CONNECTION_URL,
+		})
+		if err != nil {
+			return nil, err
+		}
+		core.Postgres = postgres
 	}
 
 	// Initialize Auth if config provided and MongoDB is available

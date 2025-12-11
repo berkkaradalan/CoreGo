@@ -73,9 +73,9 @@ Unified database interface supporting multiple database systems.
 
 **Currently Supported:**
 - ✅ MongoDB
+- ✅ PostgreSQL
 
 **Coming Soon:**
-- 🔜 PostgreSQL
 - 🔜 MySQL
 
 ```go
@@ -165,7 +165,7 @@ go run main.go
 - [x] MongoDB support
 - [x] JWT authentication
 - [x] User management
-- [ ] PostgreSQL support
+- [x] PostgreSQL support
 - [ ] MySQL support
 - [ ] Redis caching
 - [ ] Role-based access control (RBAC)

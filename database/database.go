@@ -7,4 +7,5 @@ type MongoConfig struct {
 
 type PostgresConfig struct {
 	URL 		string
+	Database	string
 }
