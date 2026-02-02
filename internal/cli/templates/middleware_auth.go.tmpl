@@ -1,0 +1,15 @@
+package middleware
+
+import (
+	"github.com/gin-gonic/gin"
+)
+
+// CustomMiddleware adds custom middleware
+func CustomMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Add your custom middleware logic here
+		c.Next()
+	}
+}
+
+// CoreGo already provides auth middleware through core.Auth.Middleware()

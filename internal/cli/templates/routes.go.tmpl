@@ -1,0 +1,45 @@
+package routes
+
+import (
+	"github.com/berkkaradalan/CoreGo"
+	"github.com/gin-gonic/gin"
+)
+
+// SetupRoutes configures all application routes
+func SetupRoutes(r *gin.Engine, core *corego.Core) {
+	// Health check
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status":  "ok",
+			"project": "{{.ProjectName}}",
+		})
+	})
+{{if .IncludeAuth}}
+
+	// Auth routes
+	auth := r.Group("/auth")
+	{
+		auth.POST("/signup", core.Auth.SignupHandler())
+		auth.POST("/login", core.Auth.LoginHandler())
+
+		// Protected routes
+		protected := auth.Group("")
+		protected.Use(core.Auth.Middleware())
+		{
+			protected.GET("/profile", core.Auth.GetProfileHandler())
+			protected.PUT("/profile", core.Auth.UpdateProfileHandler())
+			protected.DELETE("/profile", core.Auth.DeleteAccountHandler())
+		}
+	}
+{{end}}
+
+	// API routes - add your custom routes here
+	api := r.Group("/api")
+	{
+		api.GET("/", func(c *gin.Context) {
+			c.JSON(200, gin.H{
+				"message": "Welcome to {{.ProjectName}}",
+			})
+		})
+	}
+}

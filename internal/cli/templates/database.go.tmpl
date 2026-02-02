@@ -1,0 +1,31 @@
+package database
+
+import (
+	"log"
+
+	"github.com/berkkaradalan/CoreGo"
+	"github.com/berkkaradalan/CoreGo/database"
+)
+
+// InitDatabase initializes database connections
+func InitDatabase(core *corego.Core) {
+	{{if .HasMongoDB}}
+	// MongoDB is already initialized in corego.New
+	if core.Mongo != nil {
+		log.Println("MongoDB connected successfully")
+	}
+	{{end}}
+
+	{{if .HasPostgres}}
+	// PostgreSQL is already initialized in corego.New
+	if core.Postgres != nil {
+		log.Println("PostgreSQL connected successfully")
+
+		// You can run migrations here
+		// err := core.Postgres.Pool.Exec(context.Background(), "YOUR_MIGRATION_SQL")
+		// if err != nil {
+		//     log.Fatal("Migration failed:", err)
+		// }
+	}
+	{{end}}
+}

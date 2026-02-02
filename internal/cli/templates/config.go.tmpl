@@ -1,0 +1,34 @@
+package config
+
+import (
+	"os"
+
+	"github.com/berkkaradalan/CoreGo/env"
+	"github.com/joho/godotenv"
+)
+
+// Config holds application configuration
+type Config struct {
+	Env *env.Env
+}
+
+// LoadConfig loads configuration from environment
+func LoadConfig() (*Config, error) {
+	{{if .CreateEnv}}
+	// Load .env file if exists
+	_ = godotenv.Load()
+	{{end}}
+
+	return &Config{
+		Env: env.LoadEnv(),
+	}, nil
+}
+
+// GetEnv returns an environment variable or the default value
+func GetEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}

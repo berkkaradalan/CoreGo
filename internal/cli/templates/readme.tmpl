@@ -1,0 +1,55 @@
+# {{.ProjectName}}
+
+A Go REST API built with [CoreGo](https://github.com/berkkaradalan/CoreGo).
+
+## Quick Start
+
+```bash
+# Install dependencies
+go mod tidy
+{{if .CreateEnv}}
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your settings
+{{end}}
+
+# Run the server
+go run main.go
+```
+
+## Features
+
+- RESTful API with Gin framework
+{{if .HasMongoDB}}- MongoDB database integration{{end}}
+{{if .HasPostgres}}- PostgreSQL database integration{{end}}
+{{if .IncludeAuth}}- JWT authentication{{end}}
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| GET | `/api/` | Welcome message |
+{{if .IncludeAuth}}| POST | `/auth/signup` | Create account |
+| POST | `/auth/login` | Login |
+| GET | `/auth/profile` | Get profile (auth required) |
+| PUT | `/auth/profile` | Update profile (auth required) |
+| DELETE | `/auth/profile` | Delete account (auth required) |{{end}}
+
+## Project Structure
+
+```
+{{.ProjectName}}/
+├── main.go           # Entry point
+├── config/           # Configuration
+{{if or .HasMongoDB .HasPostgres}}├── database/         # Database setup{{end}}
+├── routes/           # Route definitions
+{{if .IncludeAuth}}├── handlers/         # HTTP handlers
+├── middleware/       # Middleware{{end}}
+└── README.md
+```
+
+## License
+
+MIT
