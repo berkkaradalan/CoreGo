@@ -2,49 +2,51 @@ package main
 
 import (
 	"log"
-{{if .CreateEnv}}
-	"github.com/joho/godotenv"
-{{end}}
-{{if or .HasMongoDB .HasPostgres}}
 	"os"
+{{- if .CreateEnv}}
+
+	"github.com/joho/godotenv"
+{{- end}}
+{{- if or .HasMongoDB .HasPostgres}}
 
 	"github.com/berkkaradalan/CoreGo"
 	"github.com/berkkaradalan/CoreGo/database"
-{{else}}
+{{- else}}
+
 	"github.com/berkkaradalan/CoreGo"
-{{end}}
+{{- end}}
 	"{{.ModuleName}}/routes"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
-{{if .CreateEnv}}
+{{- if .CreateEnv}}
 	// Load environment variables
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, using system environment")
 	}
-{{end}}
+{{- end}}
 
 	// Initialize CoreGo
 	config := &corego.Config{}
-{{if .HasMongoDB}}
+{{- if .HasMongoDB}}
 	config.Mongo = &database.MongoConfig{
-{{if .CreateEnv}}
+{{- if .CreateEnv}}
 		URL: os.Getenv("MONGODB_CONNECTION_URL"),
-{{else}}
+{{- else}}
 		URL: "mongodb://localhost:27017",
-{{end}}
+{{- end}}
 	}
-{{end}}
-{{if .HasPostgres}}
+{{- end}}
+{{- if .HasPostgres}}
 	config.Postgres = &database.PostgresConfig{
-{{if .CreateEnv}}
+{{- if .CreateEnv}}
 		URL: os.Getenv("POSTGRES_CONNECTION_URL"),
-{{else}}
+{{- else}}
 		URL: "postgres://localhost:5432/mydb",
-{{end}}
+{{- end}}
 	}
-{{end}}
+{{- end}}
 
 	core, err := corego.New(config)
 	if err != nil {
@@ -60,11 +62,11 @@ func main() {
 
 	// Start server
 	port := ":8080"
-{{if .CreateEnv}}
+{{- if .CreateEnv}}
 	if p := os.Getenv("PORT"); p != "" {
 		port = ":" + p
 	}
-{{end}}
+{{- end}}
 	log.Printf("Server starting on %s", port)
 	r.Run(port)
 }

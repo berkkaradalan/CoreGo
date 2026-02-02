@@ -8,9 +8,10 @@ import (
 )
 
 type ProjectConfig struct {
-	Name       string
-	Path       string
-	Database   []string
+	Name        string
+	Path        string
+	GitHubUser  string
+	Database    []string
 	IncludeAuth bool
 	CreateEnv   bool
 }
@@ -42,6 +43,12 @@ func runInit(cmd *cobra.Command, args []string) {
 				Description("What's your project called?").
 				Value(&config.Name).
 				Placeholder("my-api"),
+
+			huh.NewInput().
+				Title("GitHub username").
+				Description("Your GitHub username (for go.mod module path)").
+				Value(&config.GitHubUser).
+				Placeholder("CoreGo"),
 
 			huh.NewInput().
 				Title("Project path").
@@ -76,9 +83,12 @@ func runInit(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Set default path if empty
+	// Set defaults
 	if config.Path == "" {
 		config.Path = "./" + config.Name
+	}
+	if config.GitHubUser == "" {
+		config.GitHubUser = "yourusername"
 	}
 
 	// Call scaffold function to create the project

@@ -4,8 +4,8 @@ import (
 	"embed"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strings"
 	"text/template"
 
 	"github.com/charmbracelet/lipgloss"
@@ -16,13 +16,14 @@ var templatesFS embed.FS
 
 // TemplateData holds data for template rendering
 type TemplateData struct {
-	ProjectName   string
-	ModuleName    string
-	Databases     []string
-	IncludeAuth   bool
-	HasMongoDB    bool
-	HasPostgres   bool
-	CreateEnv     bool
+	ProjectName string
+	ModuleName  string
+	GitHubUser  string
+	Databases   []string
+	IncludeAuth bool
+	HasMongoDB  bool
+	HasPostgres bool
+	CreateEnv   bool
 }
 
 // scaffold creates the project structure based on user configuration
@@ -30,7 +31,8 @@ func scaffold(config *ProjectConfig) error {
 	// Prepare template data
 	data := TemplateData{
 		ProjectName: config.Name,
-		ModuleName:  extractModuleName(config.Name),
+		ModuleName:  fmt.Sprintf("github.com/%s/%s", config.GitHubUser, config.Name),
+		GitHubUser:  config.GitHubUser,
 		Databases:   config.Database,
 		IncludeAuth: config.IncludeAuth,
 		HasMongoDB:  contains(config.Database, "mongodb"),
@@ -144,6 +146,17 @@ func scaffold(config *ProjectConfig) error {
 		fmt.Printf("%s Created %s\n", successStyle.Render("✓"), file.path)
 	}
 
+	// Run go mod tidy
+	fmt.Println("\n📦 Running go mod tidy...")
+	tidyCmd := exec.Command("go", "mod", "tidy")
+	tidyCmd.Dir = projectPath
+	if err := tidyCmd.Run(); err != nil {
+		fmt.Printf("⚠️  Warning: go mod tidy failed: %v\n", err)
+		fmt.Println("   Run 'go mod tidy' manually in the project directory")
+	} else {
+		fmt.Println("✓ Dependencies resolved")
+	}
+
 	// Print success message
 	fmt.Println()
 	boxStyle := lipgloss.NewStyle().
@@ -153,9 +166,9 @@ func scaffold(config *ProjectConfig) error {
 
 	successMsg := fmt.Sprintf(
 		"🎉 Project %s created successfully!\n\n"+
-			"📁 cd %s\n"+
-			"📦 go mod tidy\n"+
-			"🚀 go run main.go",
+			"Next steps:\n"+
+			"  cd %s\n"+
+			"  go run main.go",
 		config.Name, config.Path,
 	)
 
@@ -174,16 +187,3 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-// extractModuleName extracts a Go module name from project name
-func extractModuleName(projectName string) string {
-	// Remove spaces and convert to lowercase
-	name := strings.ToLower(strings.ReplaceAll(projectName, " ", "-"))
-
-	// Add common prefix if not already present
-	if !strings.Contains(name, "/") {
-		// Use a generic username prefix - user should customize this
-		name = "github.com/yourusername/" + name
-	}
-
-	return name
-}

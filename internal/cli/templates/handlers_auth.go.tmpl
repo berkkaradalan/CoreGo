@@ -1,18 +1,13 @@
 package handlers
 
-import (
-	"github.com/gin-gonic/gin"
-)
-
 // AuthHandler handles authentication-related HTTP requests
+// Add your custom auth handlers here if needed.
+// CoreGo already provides basic auth handlers through core.Auth
 type AuthHandler struct {
-	// Add any dependencies here
+	// Add your dependencies here (e.g., database connection, services)
 }
 
 // NewAuthHandler creates a new auth handler
 func NewAuthHandler() *AuthHandler {
 	return &AuthHandler{}
 }
-
-// Add custom auth handlers here if needed
-// CoreGo already provides basic auth handlers through core.Auth
