@@ -1,0 +1,72 @@
+package main
+
+import (
+	"log"
+	"os"
+{{- if .CreateEnv}}
+
+	"github.com/joho/godotenv"
+{{- end}}
+{{- if or .HasMongoDB .HasPostgres}}
+
+	"github.com/berkkaradalan/CoreGo"
+	"github.com/berkkaradalan/CoreGo/database"
+{{- else}}
+
+	"github.com/berkkaradalan/CoreGo"
+{{- end}}
+	"{{.ModuleName}}/routes"
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+{{- if .CreateEnv}}
+	// Load environment variables
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env file found, using system environment")
+	}
+{{- end}}
+
+	// Initialize CoreGo
+	config := &corego.Config{}
+{{- if .HasMongoDB}}
+	config.Mongo = &database.MongoConfig{
+{{- if .CreateEnv}}
+		URL: os.Getenv("MONGODB_CONNECTION_URL"),
+{{- else}}
+		URL: "mongodb://localhost:27017",
+{{- end}}
+	}
+{{- end}}
+{{- if .HasPostgres}}
+	config.Postgres = &database.PostgresConfig{
+{{- if .CreateEnv}}
+		URL: os.Getenv("POSTGRES_CONNECTION_URL"),
+{{- else}}
+		URL: "postgres://localhost:5432/mydb",
+{{- end}}
+	}
+{{- end}}
+
+	core, err := corego.New(config)
+	if err != nil {
+		log.Fatal("Failed to initialize CoreGo:", err)
+	}
+	defer core.Close()
+
+	// Setup Gin router
+	r := gin.Default()
+
+	// Register routes
+	routes.SetupRoutes(r, core)
+
+	// Start server
+	port := ":8080"
+{{- if .CreateEnv}}
+	if p := os.Getenv("PORT"); p != "" {
+		port = ":" + p
+	}
+{{- end}}
+	log.Printf("Server starting on %s", port)
+	r.Run(port)
+}
