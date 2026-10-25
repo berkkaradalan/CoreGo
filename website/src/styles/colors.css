@@ -1,0 +1,76 @@
+/*
+ * Colors of the CoreGo website: one palette, "sage" (soft green accent),
+ * with a light variant on :root and a dark variant on .dark (the class
+ * next-themes sets on <html>).
+ *
+ * Every color the site renders comes from the tokens below. Both variants
+ * define the same set of base tokens; derived tokens (sidebar, popover,
+ * Fumadocs and Shiki variables) are mapped once in tokens.css.
+ *
+ * Guidelines (checked by `npm run check:contrast`):
+ *   - the dark background is pure black (#000); surfaces (cards, code,
+ *     hover) are slight lifts from it and borders stay around #1f-#26,
+ *   - the light background is off-white, never pure white,
+ *   - text is off-white / off-black, never pure white or black,
+ *   - --foreground, --prose, --muted-foreground and --link reach WCAG AA
+ *     (4.5:1) on --background and --card,
+ *   - every --syntax-* token reaches 4.5:1 on --code-background.
+ */
+
+/* Light variant */
+:root {
+  --background: #f4f2eb;
+  --foreground: #2a2924;
+  --prose: #36342e;
+  --card: #f9f8f3;
+  --muted: #e9e6dc;
+  --muted-foreground: #615d52;
+  --border: #dbd7ca;
+  --primary: #476b3e;
+  --primary-foreground: #f5f8f2;
+  --link: #436638;
+  --ring: #7b9a70;
+  --selection: #d6e2c9;
+  --info: #49708a;
+  --success: #476b3e;
+  --warning: #87621f;
+  --destructive: #9e4a3c;
+  --code-background: #ece9df;
+  --code-foreground: #2f2e28;
+  --syntax-keyword: #8a4561;
+  --syntax-string: #4d6a2a;
+  --syntax-comment: #686457;
+  --syntax-function: #3e6380;
+  --syntax-constant: #8c5418;
+  --syntax-type: #3f6b5a;
+  --syntax-punctuation: #57534a;
+}
+
+/* Dark variant: pure black background */
+.dark {
+  --background: #000000;
+  --foreground: #d8d4ca;
+  --prose: #bfbbb0;
+  --card: #0a0a0a;
+  --muted: #111111;
+  --muted-foreground: #a09b8d;
+  --border: #232323;
+  --primary: #9dbd91;
+  --primary-foreground: #172014;
+  --link: #a7c59b;
+  --ring: #6e8c63;
+  --selection: #36432f;
+  --info: #8eadc0;
+  --success: #9dbd91;
+  --warning: #d5b06d;
+  --destructive: #d8907f;
+  --code-background: #0a0a0a;
+  --code-foreground: #d6d2c6;
+  --syntax-keyword: #cf9db2;
+  --syntax-string: #b3c78c;
+  --syntax-comment: #8f8a7d;
+  --syntax-function: #98b6c9;
+  --syntax-constant: #dcac76;
+  --syntax-type: #93c2ad;
+  --syntax-punctuation: #aaa598;
+}

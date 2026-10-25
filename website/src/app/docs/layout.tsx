@@ -1,16 +1,7 @@
-import { DocsShell } from "@/components/DocsShell";
-import { docHref, navSections } from "@/lib/docs";
-import { REPO_URL } from "@/lib/site";
+import { DocsShell } from "@/components/docs/docs-shell";
+import { pageTree } from "@/lib/docs/source";
 
-export default function DocsLayout({ children }: { children: React.ReactNode }) {
-  const sections = navSections().map((s) => ({
-    name: s.name,
-    pages: s.pages.map((p) => ({ href: docHref(p), title: p.title })),
-  }));
-
-  return (
-    <DocsShell sections={sections} repoUrl={REPO_URL}>
-      {children}
-    </DocsShell>
-  );
+/** The documentation frame: navbar, sidebar, search and mobile drawer. */
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return <DocsShell tree={pageTree()}>{children}</DocsShell>;
 }
