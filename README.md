@@ -1,4 +1,8 @@
-# CoreGo
+<p align="center">
+  <img src=".github/logo.png" width="120" height="120" alt="CoreGo logo">
+</p>
+
+<h1 align="center">CoreGo</h1>
 
 CoreGo is a backend SDK for Go that gives you the parts every API ends up
 needing (email and password authentication with server-side sessions,
