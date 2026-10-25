@@ -1,535 +1,513 @@
-# Database Operations
+# Database
 
-CoreGo provides a unified database interface that works across different database systems.
+The `database` package connects your application to **MongoDB** (official
+driver v2) and **PostgreSQL** (pgx v5) and adds a small set of typed,
+context-aware helpers on top. You can use it through the `corego` facade or
+on its own.
 
-## Supported Databases
+- [Connect](#connect)
+- [MongoDB](#mongodb)
+- [PostgreSQL](#postgresql)
+- [Typed queries: QueryAll and QueryOne](#typed-queries-queryall-and-queryone)
+- [Transactions](#transactions)
+- [Handling "not found"](#handling-not-found)
+- [Escape hatches: the raw drivers](#escape-hatches-the-raw-drivers)
+- [Reference](#reference)
 
-- **MongoDB** - Full support with unified API
-- **PostgreSQL** - Full support with SQL operations
-- **MySQL** - Coming soon
+## Connect
 
-## Configuration
+### With the facade
 
-### MongoDB
+Set a connection URL and the facade connects for you when the app starts:
 
-```go
-core, err := corego.New(&corego.Config{
-    Mongo: &database.MongoConfig{
-        URL:      "mongodb://localhost:27017",
-        Database: "myapp",
-    },
-})
-```
-
-### PostgreSQL
-
-```go
-core, err := corego.New(&corego.Config{
-    Postgres: &database.PostgresConfig{
-        URL: "postgres://user:password@localhost:5432/myapp",
-    },
-})
-```
-
-### Auto-Configuration
-
-CoreGo automatically connects to databases if environment variables are set in your `.env`:
-
-**MongoDB:**
-```env
-MONGODB_CONNECTION_URL=mongodb://localhost:27017
-MONGODB_DATABASE=myapp
-```
-
-**PostgreSQL:**
-```env
+```bash
+# .env (or the process environment)
+MONGODB_CONNECTION_URL=mongodb://localhost:27017/myapp
 POSTGRES_CONNECTION_URL=postgres://user:password@localhost:5432/myapp
 ```
 
 ```go
-// No database config needed - auto-connects from .env
+core, err := corego.New(nil)
+if err != nil {
+	log.Fatal(err)
+}
+defer core.Close() // closes both connections
+
+mongo := core.Mongo // *database.MongoDB, nil when MongoDB is not configured
+pg := core.Postgres  // *database.PostgresDB, nil when PostgreSQL is not configured
+```
+
+`MONGODB_DATABASE` optionally names the MongoDB database (see
+[Choosing the MongoDB database](#choosing-the-mongodb-database)). To configure
+in code instead of the environment, set `Config.Mongo` / `Config.Postgres`;
+an explicit config always wins over the environment:
+
+```go
 core, err := corego.New(&corego.Config{
-    Auth: &auth.Config{...},
+	Mongo:    &database.MongoConfig{URL: "mongodb://localhost:27017", Database: "myapp"},
+	Postgres: &database.PostgresConfig{URL: "postgres://user:password@localhost:5432/myapp"},
 })
 ```
 
-## CRUD Operations
-
-### Insert One
+### Standalone
 
 ```go
-// Insert a document
-doc := map[string]any{
-    "name":  "John Doe",
-    "email": "john@example.com",
-    "age":   30,
-}
-
-id, err := core.Mongo.InsertOne("users", doc)
+mongo, err := database.NewMongoDB(database.MongoConfig{URL: "mongodb://localhost:27017/myapp"})
 if err != nil {
-    // Handle error
+	log.Fatal(err)
 }
+defer mongo.Close()
 
-fmt.Println("Inserted ID:", id)
-```
-
-### Insert with Struct
-
-```go
-type User struct {
-    Name  string `bson:"name"`
-    Email string `bson:"email"`
-    Age   int    `bson:"age"`
-}
-
-user := User{
-    Name:  "Jane Doe",
-    Email: "jane@example.com",
-    Age:   28,
-}
-
-id, err := core.Mongo.InsertOne("users", user)
-```
-
-### Find One
-
-```go
-type User struct {
-    ID    string `bson:"_id"`
-    Name  string `bson:"name"`
-    Email string `bson:"email"`
-}
-
-var user User
-err := core.Mongo.FindOne("users", map[string]any{
-    "email": "john@example.com",
-}, &user)
-
+pg, err := database.NewPostgresDB(database.PostgresConfig{URL: "postgres://user:password@localhost:5432/myapp"})
 if err != nil {
-    // User not found or error
+	log.Fatal(err)
 }
+defer pg.Close()
 ```
 
-### Find Many
+Both constructors:
+
+- reject an empty URL with an error;
+- connect and **ping** the server within a 10 second budget, so a returned
+  handle is known to work (an unreachable server fails at startup, not on the
+  first request);
+- release the client / pool again when the ping fails, so nothing leaks;
+- never include your password in an error message.
+
+`Close` is safe to call more than once and on a nil handle. `MongoDB.Close`
+waits at most 10 seconds for in-flight operations.
+
+### Choosing the MongoDB database
+
+The MongoDB helpers all work on one database, resolved in this order:
+
+1. `MongoConfig.Database` (with the facade: `MONGODB_DATABASE`);
+2. the database in the URL path, e.g. `myapp` in
+   `mongodb+srv://user:pass@cluster0.example.net/myapp?retryWrites=true`;
+3. `"corego"` (`database.DefaultMongoDatabase`).
 
 ```go
-// Find all users over 25
-results, err := core.Mongo.Find("users", map[string]any{
-    "age": map[string]any{"$gt": 25},
-})
-
-if err != nil {
-    // Handle error
-}
-
-for _, doc := range results {
-    name := doc["name"].(string)
-    email := doc["email"].(string)
-    fmt.Printf("User: %s (%s)\n", name, email)
-}
+mongo.Name() // "myapp"
 ```
 
-### Update One
+Names MongoDB would reject (empty, longer than 63 bytes, or containing
+`/ \ . " $`, a space or NUL) are reported by `NewMongoDB` instead of failing
+on the first query.
+
+### Contexts
+
+Every helper takes a `context.Context` as its first argument and there is no
+hidden per-operation timeout: cancellation and deadlines reach the server.
+Inside a CoreGo handler the `*web.Context` **is** a `context.Context`, so pass
+`c` straight through:
 
 ```go
-err := core.Mongo.UpdateOne(
-    "users",
-    map[string]any{"email": "john@example.com"},
-    map[string]any{
-        "$set": map[string]any{
-            "age": 31,
-            "updated_at": time.Now(),
-        },
-    },
-)
-```
-
-### Update Many
-
-```go
-// Update all users in a city
-err := core.Mongo.UpdateMany(
-    "users",
-    map[string]any{"city": "New York"},
-    map[string]any{
-        "$set": map[string]any{
-            "timezone": "EST",
-        },
-    },
-)
-```
-
-### Delete One
-
-```go
-err := core.Mongo.DeleteOne("users", map[string]any{
-    "email": "john@example.com",
+app.Get("/tasks", func(c *web.Context) error {
+	var tasks []Task
+	if err := core.Mongo.Find(c, "tasks", bson.M{"done": false}, &tasks); err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, tasks)
 })
 ```
 
-### Delete Many
+## MongoDB
+
+Documents are your own structs with `bson` tags (or `bson.M` / `bson.D` /
+maps). The examples below use this type:
 
 ```go
-// Delete all inactive users
-err := core.Mongo.DeleteMany("users", map[string]any{
-    "status": "inactive",
-})
-```
-
-## Advanced Queries
-
-### Complex Filters
-
-```go
-// Find users between 25-35 years old in specific cities
-filter := map[string]any{
-    "age": map[string]any{
-        "$gte": 25,
-        "$lte": 35,
-    },
-    "city": map[string]any{
-        "$in": []string{"New York", "San Francisco", "Boston"},
-    },
-    "status": "active",
-}
-
-results, err := core.Mongo.Find("users", filter)
-```
-
-### Projections
-
-For advanced queries, access the raw collection:
-
-```go
-collection := core.Mongo.Collection("users")
-
-opts := options.Find().SetProjection(map[string]any{
-    "name": 1,
-    "email": 1,
-    "_id": 0,
-})
-
-cursor, err := collection.Find(context.Background(), filter, opts)
-```
-
-## Working with Collections
-
-### Get Raw Collection
-
-```go
-// Access MongoDB collection directly for advanced operations
-collection := core.Mongo.Collection("users")
-
-// Now you can use any MongoDB driver method
-cursor, err := collection.Find(context.Background(), bson.M{})
-count, err := collection.CountDocuments(context.Background(), bson.M{})
-```
-
-### Indexes
-
-```go
-collection := core.Mongo.Collection("users")
-
-// Create an index
-indexModel := mongo.IndexModel{
-    Keys: bson.D{{Key: "email", Value: 1}},
-    Options: options.Index().SetUnique(true),
-}
-
-_, err := collection.Indexes().CreateOne(context.Background(), indexModel)
-```
-
-## Real-World Examples
-
-### Blog Post CRUD
-
-```go
-type BlogPost struct {
-    ID        string    `bson:"_id,omitempty"`
-    UserID    string    `bson:"user_id"`
-    Title     string    `bson:"title"`
-    Content   string    `bson:"content"`
-    Tags      []string  `bson:"tags"`
-    CreatedAt time.Time `bson:"created_at"`
-    UpdatedAt time.Time `bson:"updated_at"`
-}
-
-// Create post
-post := BlogPost{
-    UserID:    userID,
-    Title:     "Getting Started with CoreGo",
-    Content:   "CoreGo is a powerful framework...",
-    Tags:      []string{"go", "backend", "framework"},
-    CreatedAt: time.Now(),
-    UpdatedAt: time.Now(),
-}
-
-postID, err := core.Mongo.InsertOne("posts", post)
-
-// Get user's posts
-posts, err := core.Mongo.Find("posts", map[string]any{
-    "user_id": userID,
-})
-
-// Update post
-err = core.Mongo.UpdateOne(
-    "posts",
-    map[string]any{"_id": postID},
-    map[string]any{
-        "$set": map[string]any{
-            "content": "Updated content...",
-            "updated_at": time.Now(),
-        },
-    },
+import (
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-// Delete post
-err = core.Mongo.DeleteOne("posts", map[string]any{
-    "_id": postID,
-    "user_id": userID, // Ensure user owns the post
-})
-```
-
-### User Analytics
-
-```go
-// Track user activity
-activity := map[string]any{
-    "user_id": userID,
-    "action": "page_view",
-    "page": "/dashboard",
-    "timestamp": time.Now(),
-    "metadata": map[string]any{
-        "ip": "192.168.1.1",
-        "user_agent": "Mozilla/5.0...",
-    },
+type Task struct {
+	ID        bson.ObjectID `bson:"_id,omitempty" json:"id"`
+	Title     string        `bson:"title"         json:"title"`
+	Done      bool          `bson:"done"          json:"done"`
+	OwnerID   string        `bson:"owner_id"      json:"owner_id"`
+	CreatedAt time.Time     `bson:"created_at"    json:"created_at"`
 }
-
-_, err := core.Mongo.InsertOne("analytics", activity)
-
-// Get user's recent activity
-activities, err := core.Mongo.Find("analytics", map[string]any{
-    "user_id": userID,
-})
-```
-
-## Error Handling
-
-```go
-id, err := core.Mongo.InsertOne("users", doc)
-if err != nil {
-    if mongo.IsDuplicateKeyError(err) {
-        // Handle duplicate key error
-    } else {
-        // Handle other errors
-    }
-}
-```
-
-## Best Practices
-
-1. **Use Indexes**: Create indexes for frequently queried fields
-2. **Connection Pooling**: CoreGo handles this automatically
-3. **Context Timeouts**: Operations have default 5-second timeouts
-4. **Error Handling**: Always check for errors
-5. **Data Validation**: Validate data before inserting
-
----
-
-# PostgreSQL Operations
-
-CoreGo provides direct SQL access to PostgreSQL with pgx/v5.
-
-## SQL Operations
-
-PostgreSQL uses two main methods:
-
-### Query - Returns Results
-
-```go
-// Returns []map[string]any
-results, err := core.Postgres.Query(
-    "SELECT * FROM users WHERE age > $1",
-    25,
-)
-
-for _, row := range results {
-    name := row["name"].(string)
-    email := row["email"].(string)
-}
-```
-
-### Exec - Returns Affected Rows
-
-```go
-// Returns affected row count
-affected, err := core.Postgres.Exec(
-    "UPDATE users SET age = $1 WHERE email = $2",
-    31, "john@example.com",
-)
-```
-
-## Basic CRUD
-
-### Create Table
-
-```go
-_, err := core.Postgres.Exec(`
-    CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        age INT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-`)
 ```
 
 ### Insert
 
 ```go
-// Insert and get the created record with RETURNING
-result, err := core.Postgres.Query(
-    "INSERT INTO users (name, email, age) VALUES ($1, $2, $3) RETURNING id, name, email, created_at",
-    "Jane Doe", "jane@example.com", 28,
-)
-
-userID := result[0]["id"]
+id, err := core.Mongo.InsertOne(ctx, "tasks", Task{
+	Title:     "ship the docs",
+	OwnerID:   userID,
+	CreatedAt: time.Now(),
+})
+taskID := id.(bson.ObjectID) // the driver generated an ObjectID for the empty _id
 ```
 
-### Query
+`InsertOne` returns the inserted `_id` exactly as the driver reports it: a
+`bson.ObjectID` when the driver generated one, or your own `_id` value
+(for example a string) when the document carried one.
+
+### Find one
 
 ```go
-// Find one
-user, err := core.Postgres.Query(
-    "SELECT * FROM users WHERE email = $1 LIMIT 1",
-    "john@example.com",
-)
-
-if len(user) == 0 {
-    // Not found
+var task Task
+err := core.Mongo.FindOne(ctx, "tasks", bson.M{"_id": taskID}, &task)
+if errors.Is(err, database.ErrNotFound) {
+	return web.NotFound("task not found")
 }
+if err != nil {
+	return err
+}
+```
 
-// Find many
-users, err := core.Postgres.Query(
-    "SELECT * FROM users WHERE age > $1 ORDER BY created_at DESC",
-    25,
+### Find many
+
+`Find` decodes into a pointer to a slice. Sorting, paging and projections are
+ordinary driver options:
+
+```go
+var tasks []Task
+err := core.Mongo.Find(ctx, "tasks",
+	bson.M{"owner_id": userID, "done": false},
+	&tasks,
+	options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}}).
+		SetSkip(20).
+		SetLimit(20),
 )
+```
+
+When nothing matches, `tasks` is an **empty, non-nil** slice, so it encodes
+as `[]` (not `null`) in JSON responses. Anything already in the slice is
+replaced.
+
+### Count
+
+```go
+open, err := core.Mongo.Count(ctx, "tasks", bson.M{"owner_id": userID, "done": false})
+all, err := core.Mongo.Count(ctx, "tasks", nil) // nil filter = every document
 ```
 
 ### Update
 
 ```go
-// Update with RETURNING
-result, err := core.Postgres.Query(
-    "UPDATE users SET age = $1 WHERE email = $2 RETURNING *",
-    31, "john@example.com",
-)
+// Exactly one document; ErrNotFound when nothing matched.
+err := core.Mongo.UpdateOne(ctx, "tasks",
+	bson.M{"_id": taskID, "owner_id": userID},
+	bson.M{"$set": bson.M{"done": true}})
 
-// Dynamic updates (only update provided fields)
-result, err := core.Postgres.Query(`
-    UPDATE users
-    SET name = COALESCE($1, name),
-        age = COALESCE($2, age)
-    WHERE id = $3
-    RETURNING *`,
-    newName, newAge, userID,
-)
+// Every match; returns how many documents matched.
+n, err := core.Mongo.UpdateMany(ctx, "tasks",
+	bson.M{"owner_id": userID},
+	bson.M{"$set": bson.M{"done": true}})
 ```
+
+`UpdateOne` succeeds when a document matched, even if the update left it
+unchanged. The update must use operators such as `$set`; to replace a whole
+document use the driver's `ReplaceOne` (see [escape hatches](#escape-hatches-the-raw-drivers)).
 
 ### Delete
 
 ```go
-affected, err := core.Postgres.Exec(
-    "DELETE FROM users WHERE email = $1",
-    "john@example.com",
-)
+// Exactly one document; ErrNotFound when nothing was deleted.
+err := core.Mongo.DeleteOne(ctx, "tasks", bson.M{"_id": taskID, "owner_id": userID})
 
-if affected == 0 {
-    // No records deleted
-}
+// Every match; returns how many were deleted.
+n, err := core.Mongo.DeleteMany(ctx, "tasks", bson.M{"done": true})
 ```
 
-## Real-World Example
+### nil filters
 
-### Product CRUD
+For the **read** helpers (`FindOne`, `Find`, `Count`) a `nil` filter matches
+every document. The **write** helpers (`UpdateOne`, `UpdateMany`,
+`DeleteOne`, `DeleteMany`) reject a `nil` filter with the driver's
+`mongo.ErrNilDocument`, so a forgotten filter can never modify or delete a
+whole collection. Pass `bson.M{}` when you really mean "all documents".
 
-```go
-// Create products table
-_, err := core.Postgres.Exec(`
-    CREATE TABLE IF NOT EXISTS products (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        price DECIMAL(10,2) NOT NULL,
-        stock INT DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-`)
+## PostgreSQL
 
-// Create product
-product, err := core.Postgres.Query(
-    "INSERT INTO products (name, price, stock) VALUES ($1, $2, $3) RETURNING *",
-    "Laptop", 999.99, 10,
-)
+Always pass values as arguments (`$1`, `$2`, ...); never format them into
+the SQL string.
 
-// Get all products
-products, err := core.Postgres.Query("SELECT * FROM products ORDER BY created_at DESC")
+### Exec
 
-// Update stock
-_, err = core.Postgres.Exec(
-    "UPDATE products SET stock = stock - $1 WHERE id = $2",
-    1, productID,
-)
-
-// Delete product
-_, err = core.Postgres.Exec("DELETE FROM products WHERE id = $1", productID)
-```
-
-## Advanced Features
-
-### Transactions
+`Exec` runs statements that return no rows and reports the affected row
+count:
 
 ```go
-pool := core.Postgres.GetPool()
-tx, err := pool.Begin(context.Background())
+_, err := core.Postgres.Exec(ctx, `CREATE TABLE IF NOT EXISTS tasks (
+	id         BIGSERIAL PRIMARY KEY,
+	title      TEXT NOT NULL,
+	done       BOOLEAN NOT NULL DEFAULT FALSE,
+	owner_id   TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)`)
+
+n, err := core.Postgres.Exec(ctx,
+	`UPDATE tasks SET done = TRUE WHERE id = $1 AND owner_id = $2`, taskID, userID)
 if err != nil {
-    // Handle error
+	return err
 }
-defer tx.Rollback(context.Background())
-
-// Execute operations
-_, err = tx.Exec(context.Background(), "INSERT INTO users (name) VALUES ($1)", "John")
-_, err = tx.Exec(context.Background(), "INSERT INTO orders (user_id) VALUES ($1)", userID)
-
-// Commit
-err = tx.Commit(context.Background())
+if n == 0 {
+	return web.NotFound("task not found")
+}
 ```
 
-### Joins
+### Rows
+
+For reading rows use the typed [QueryAll / QueryOne](#typed-queries-queryall-and-queryone)
+functions. Two lower-level methods are also available:
 
 ```go
-posts, err := core.Postgres.Query(`
-    SELECT
-        p.id, p.title, p.content,
-        u.name as author_name
-    FROM posts p
-    INNER JOIN users u ON p.user_id = u.id
-    WHERE p.published = true
-`)
+// Maps keyed by column name, for ad-hoc queries. Empty result -> empty non-nil slice.
+rows, err := core.Postgres.QueryMaps(ctx, `SELECT id, title FROM tasks WHERE done = $1`, false)
+fmt.Println(rows[0]["title"])
+
+// Raw pgx.Rows; you must Close them (or consume them with a pgx collect function).
+raw, err := core.Postgres.Query(ctx, `SELECT title FROM tasks`)
+if err != nil {
+	return err
+}
+titles, err := pgx.CollectRows(raw, pgx.RowTo[string])
 ```
 
-### Raw Connection Pool
+## Typed queries: QueryAll and QueryOne
+
+`QueryAll[T]` and `QueryOne[T]` scan rows straight into your own types:
 
 ```go
-pool := core.Postgres.GetPool()
-rows, err := pool.Query(context.Background(), "SELECT * FROM users")
-defer rows.Close()
+type Task struct {
+	ID        int64     `db:"id"         json:"id"`
+	Title     string    `db:"title"      json:"title"`
+	Done      bool      `db:"done"       json:"done"`
+	OwnerID   string    `db:"owner_id"   json:"owner_id"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+tasks, err := database.QueryAll[Task](ctx, core.Postgres,
+	`SELECT id, title, done, owner_id, created_at
+	   FROM tasks WHERE owner_id = $1 ORDER BY created_at DESC`, userID)
+
+task, err := database.QueryOne[Task](ctx, core.Postgres,
+	`SELECT id, title, done, owner_id, created_at FROM tasks WHERE id = $1`, taskID)
+if errors.Is(err, database.ErrNotFound) {
+	return web.NotFound("task not found")
+}
+
+// INSERT ... RETURNING gives you generated values in the same round trip.
+id, err := database.QueryOne[int64](ctx, core.Postgres,
+	`INSERT INTO tasks (title, owner_id) VALUES ($1, $2) RETURNING id`, "ship the docs", userID)
+
+// Single-column results scan into plain types.
+count, err := database.QueryOne[int64](ctx, core.Postgres, `SELECT count(*) FROM tasks`)
+titles, err := database.QueryAll[string](ctx, core.Postgres, `SELECT title FROM tasks`)
 ```
 
-## Best Practices
+How rows map to `T`:
 
-1. **Always use parameterized queries** (`$1, $2`) to prevent SQL injection
-2. **Use RETURNING** to get data back from INSERT/UPDATE/DELETE
-3. **Check affected rows** for UPDATE/DELETE operations
-4. **Create indexes** for frequently queried columns
-5. **Use transactions** for operations that must succeed or fail together
+- **Struct `T`**: each column fills the exported field whose `db` tag equals
+  the column name; fields without a tag match by name case-insensitively,
+  ignoring underscores (`created_at` fills `CreatedAt`). Every selected column
+  must map to a field and every field must be selected; tag a field
+  `db:"-"` to leave it out. Embedded structs are flattened. These are pgx's
+  `RowToStructByName` rules.
+- **Any other `T`** (`int64`, `string`, `bool`, `[]byte`, ...) and types the
+  driver scans as one value (`time.Time`, `sql.NullString`, `pgtype.Numeric`
+  and other `sql.Scanner` implementations): the query must return exactly
+  one column.
+- `QueryAll` returns an **empty, non-nil** slice when there are no rows.
+- `QueryOne` returns the first row (add `LIMIT 1` or a unique condition to
+  make that explicit) and an error matching `database.ErrNotFound` when
+  there is none.
+
+The second argument is a `database.Querier`: anything with pgx's `Query`
+method. `*database.PostgresDB`, `*pgxpool.Pool`, `pgx.Tx` and `*pgx.Conn` all
+qualify, so the same calls work inside a transaction.
+
+### Time zones of TIMESTAMPTZ values
+
+A `TIMESTAMPTZ` column scans into a `time.Time` that holds the right
+instant but is expressed in the **time zone of your Go process**
+(`time.Local`, set by the `TZ` variable or the system), not in UTC. A
+server at UTC and an application running on a laptop in Berlin give
+`2026-01-02 04:04:05 +0100 CET` for a value stored as
+`2026-01-02 03:04:05+00`. Instants compare correctly with `Equal`,
+`Before` and `After`, but `==`, the JSON encoding (`"...+01:00"`) and
+formatting differ from machine to machine.
+
+Convert explicitly when you need UTC, for example before returning the
+value in an API response:
+
+```go
+task.CreatedAt = task.CreatedAt.UTC()
+```
+
+or run the process with `TZ=UTC`. The PostgreSQL session setting does
+**not** help here: `?timezone=UTC` in the connection URL changes how the
+server formats timestamps as text (`now()::text`, `SHOW TimeZone`), but
+pgx receives `TIMESTAMPTZ` values in binary form and always decodes them
+in `time.Local`. (Verified with pgx v5.7 against PostgreSQL 17.)
+
+The auth stores are not affected: `auth/pgstore` and `auth/mongostore`
+normalize every timestamp of users, sessions and tokens to UTC.
+
+### Connection URL parameters
+
+pgx passes parameters it does not handle itself (everything except
+options such as `sslmode`, `pool_max_conns` or `connect_timeout`) to the
+server as session settings when each connection starts. For example
+`?search_path=myapp` makes `myapp` the default schema of every pooled
+connection, and `?application_name=api` labels the connections in
+`pg_stat_activity`:
+
+```bash
+POSTGRES_CONNECTION_URL=postgres://app:secret@localhost:5432/app?search_path=myapp&sslmode=disable
+```
+
+[auth-storage.md](auth-storage.md#a-dedicated-schema) shows how to keep
+the auth tables in their own schema this way.
+
+## Transactions
+
+`WithTx` runs a function inside a transaction. Return `nil` to commit; return
+an error to roll back. A panic also rolls back and is then re-raised.
+
+```go
+err := core.Postgres.WithTx(ctx, func(tx pgx.Tx) error {
+	balance, err := database.QueryOne[int64](ctx, tx,
+		`SELECT balance FROM accounts WHERE id = $1 FOR UPDATE`, fromID)
+	if err != nil {
+		return err
+	}
+	if balance < amount {
+		return ErrInsufficientFunds // rolled back; WithTx returns this error unchanged
+	}
+	if _, err := tx.Exec(ctx, `UPDATE accounts SET balance = balance - $1 WHERE id = $2`, amount, fromID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE accounts SET balance = balance + $1 WHERE id = $2`, amount, toID)
+	return err
+})
+if errors.Is(err, ErrInsufficientFunds) {
+	return web.Conflict("insufficient funds")
+}
+```
+
+Things to know:
+
+- Run every statement of the transaction on `tx`, not on `core.Postgres`;
+  statements on the pool run outside the transaction.
+- The error your function returns comes back unchanged, so `errors.Is` /
+  `errors.As` work. If the rollback itself fails, both errors are joined.
+- A failed statement aborts the transaction in PostgreSQL. If you ignore its
+  error and return `nil`, the commit fails and `WithTx` returns that error.
+- The rollback runs even when `ctx` has already been canceled, so the
+  connection always goes back to the pool clean.
+
+## Handling "not found"
+
+These calls report "nothing matched" with an error that matches
+`database.ErrNotFound`:
+
+| Call | When |
+| --- | --- |
+| `MongoDB.FindOne` | no document matches |
+| `MongoDB.UpdateOne` | no document matches |
+| `MongoDB.DeleteOne` | nothing was deleted |
+| `QueryOne` | the query returned no row |
+
+```go
+if errors.Is(err, database.ErrNotFound) {
+	return web.NotFound("task not found")
+}
+```
+
+The same errors also match the driver sentinels, so existing code keeps
+working: `mongo.ErrNoDocuments` for MongoDB, and `pgx.ErrNoRows` (and
+`sql.ErrNoRows`) for `QueryOne`.
+
+Calls that work on many rows never report "not found": `Find` and `QueryAll`
+return an empty slice, `Count` returns 0, and `UpdateMany`, `DeleteMany` and
+`Exec` return a count of 0.
+
+## Escape hatches: the raw drivers
+
+The helpers cover everyday CRUD. Everything else is one call away on the
+official drivers:
+
+```go
+// MongoDB
+core.Mongo.Collection("tasks") // *mongo.Collection: Aggregate, ReplaceOne, upserts, BulkWrite, Indexes()...
+core.Mongo.Database()          // *mongo.Database: RunCommand, ListCollectionNames, ...
+core.Mongo.Client()            // *mongo.Client: sessions and multi-document transactions
+
+// PostgreSQL
+core.Postgres.Pool()           // *pgxpool.Pool: SendBatch, CopyFrom, Acquire (LISTEN/NOTIFY), ...
+```
+
+For example, an upsert and an aggregation:
+
+```go
+_, err := core.Mongo.Collection("settings").UpdateOne(ctx,
+	bson.M{"user_id": userID},
+	bson.M{"$set": bson.M{"theme": "dark"}},
+	options.UpdateOne().SetUpsert(true))
+
+cursor, err := core.Mongo.Collection("tasks").Aggregate(ctx, mongo.Pipeline{
+	{{Key: "$match", Value: bson.M{"owner_id": userID}}},
+	{{Key: "$group", Value: bson.M{"_id": "$done", "count": bson.M{"$sum": 1}}}},
+})
+```
+
+The CoreGo auth stores keep their data in their own prefixed collections and
+tables (`corego_users`, `corego_sessions`, ...) in the same database; read
+them if you need to, but let the auth service write them.
+
+## Reference
+
+```go
+var ErrNotFound error
+const DefaultMongoDatabase = "corego"
+
+type MongoConfig struct {
+	URL      string // required
+	Database string // optional; default: database in the URL path, else "corego"
+}
+type PostgresConfig struct {
+	URL string // required
+}
+
+func NewMongoDB(cfg MongoConfig) (*MongoDB, error)
+func (m *MongoDB) Client() *mongo.Client
+func (m *MongoDB) Database() *mongo.Database
+func (m *MongoDB) Name() string
+func (m *MongoDB) Collection(name string) *mongo.Collection
+func (m *MongoDB) Ping(ctx context.Context) error
+func (m *MongoDB) Close() error
+func (m *MongoDB) InsertOne(ctx context.Context, collection string, document any) (any, error)
+func (m *MongoDB) FindOne(ctx context.Context, collection string, filter any, out any) error
+func (m *MongoDB) Find(ctx context.Context, collection string, filter any, out any, opts ...options.Lister[options.FindOptions]) error
+func (m *MongoDB) Count(ctx context.Context, collection string, filter any) (int64, error)
+func (m *MongoDB) UpdateOne(ctx context.Context, collection string, filter, update any) error
+func (m *MongoDB) UpdateMany(ctx context.Context, collection string, filter, update any) (int64, error)
+func (m *MongoDB) DeleteOne(ctx context.Context, collection string, filter any) error
+func (m *MongoDB) DeleteMany(ctx context.Context, collection string, filter any) (int64, error)
+
+func NewPostgresDB(cfg PostgresConfig) (*PostgresDB, error)
+func (p *PostgresDB) Pool() *pgxpool.Pool
+func (p *PostgresDB) Ping(ctx context.Context) error
+func (p *PostgresDB) Close() error
+func (p *PostgresDB) Exec(ctx context.Context, sql string, args ...any) (int64, error)
+func (p *PostgresDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+func (p *PostgresDB) QueryMaps(ctx context.Context, sql string, args ...any) ([]map[string]any, error)
+func (p *PostgresDB) WithTx(ctx context.Context, fn func(tx pgx.Tx) error) error
+
+type Querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+func QueryAll[T any](ctx context.Context, q Querier, sql string, args ...any) ([]T, error)
+func QueryOne[T any](ctx context.Context, q Querier, sql string, args ...any) (T, error)
+```
+
+The package works with the official MongoDB Go driver **v2**
+(`go.mongodb.org/mongo-driver/v2/...`); import `bson`, `mongo` and
+`options` from there.

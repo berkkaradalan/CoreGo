@@ -1,191 +1,177 @@
 # CoreGo
 
-A comprehensive backend framework for Go that provides production-ready authentication, multi-database support, and environment management through a unified API. Framework-agnostic and built for developer experience.
-
-![image search api](https://berkkdev.com/corego.png)
-
+CoreGo is a backend SDK for Go that gives you the parts every API ends up
+needing (email and password authentication with server-side sessions,
+email verification and password reset, MongoDB and PostgreSQL access,
+transactional email, a small web framework and `.env` configuration)
+behind one facade, `corego.New`. It is built on the standard library plus
+the official MongoDB and PostgreSQL drivers.
 
 ## Features
 
-- **🔐 Authentication System**: Built-in JWT authentication with user management
-- **💾 Multi-Database Support**: Currently supports MongoDB (PostgreSQL, MySQL coming soon)
-- **🎯 Framework Agnostic**: Works with any Go web framework (Gin, Echo, Fiber, etc.)
-- **⚙️ Environment Management**: Seamless `.env` file integration
-- **🔌 Modular Design**: Use only what you need
-- **🚀 Production Ready**: Battle-tested components for real-world applications
+- **Authentication**: sign-up, sign-in, opaque server-side sessions
+  (hashed at rest, remember-me), email verification, password reset,
+  password and email change, account deletion, bans, user listing.
+  Enumeration-safe and timing-safe by design.
+- **17 ready-made auth routes** under `/auth`, with bearer-token or
+  HttpOnly-cookie transport (CSRF-checked), per-IP and per-email rate
+  limiting and stable JSON errors.
+- **One-line route protection**: `core.RequireAuth()` and
+  `auth.MustUser(c)`, or `core.OptionalAuth()` for routes that serve
+  guests too.
+- **Safe under concurrency**: optimistic locking on users and accounts, so
+  concurrent requests never lose each other's changes, and single-use
+  tokens that cannot be redeemed twice.
+- **Web framework**: a standard-library-only router with path parameters,
+  groups, middleware, JSON binding, CORS, rate limiting, request logging,
+  panic recovery, server timeouts and graceful shutdown.
+- **Auth stores** for MongoDB, PostgreSQL (versioned migrations) and
+  memory, chosen automatically from the environment.
+- **Databases**: context-aware MongoDB CRUD helpers, typed PostgreSQL
+  queries (`QueryAll[T]`, `QueryOne[T]`), transactions, raw driver access.
+- **Mail**: SMTP (STARTTLS or implicit TLS), a log sender for development
+  and a capture sender for tests.
+- **Configuration**: `.env` plus process environment, typed getters,
+  everything overridable in code.
 
-## 📥 Installation
+## Install
 
 ```bash
-go get github.com/berkkaradalan/CoreGo
+go get github.com/berkkaradalan/CoreGo@v0.2.0
 ```
 
-## 🚀 Quick Start
+Go 1.24 or newer. (Until the `v0.2.0` tag is published, use `@main`.)
+
+## Hello world
+
+A complete API with sign-up, sign-in and a protected route:
 
 ```go
 package main
 
 import (
-    "github.com/berkkaradalan/CoreGo"
-    "github.com/berkkaradalan/CoreGo/auth"
+	"log"
+	"net/http"
+
+	corego "github.com/berkkaradalan/CoreGo"
+	"github.com/berkkaradalan/CoreGo/auth"
+	"github.com/berkkaradalan/CoreGo/web"
 )
 
 func main() {
-    // Initialize CoreGo with your preferred database
-    core, err := corego.New(&corego.Config{
-        Auth: &auth.Config{
-            Secret:       "your-jwt-secret",
-            TokenExpiry:  60,
-            DatabaseName: "users",
-        },
-    })
-    if err != nil {
-        panic(err)
-    }
-    defer core.Close()
-
-    // Your application logic here
+	core, err := corego.New(&corego.Config{Auth: &corego.AuthOptions{}})
+	if err != nil {
+		log.Fatal(err)
+	}
+	app := core.Server()
+	api := app.Group("/api", core.RequireAuth())
+	api.Get("/hello", func(c *web.Context) error {
+		user := auth.MustUser(c)
+		return c.JSON(http.StatusOK, map[string]string{"hello": user.Name})
+	})
+	if err := core.Run(); err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
-## 📦 Core Modules
+It runs without any infrastructure: with no database configured, users
+and sessions are kept in memory (a startup warning says so). Set
+`POSTGRES_CONNECTION_URL` or `MONGODB_CONNECTION_URL` and the same code
+stores them in that database.
 
-### 🔐 Authentication
-Full-featured authentication system with JWT tokens, user management, and customizable user data.
+## Try it
 
-```go
-// Signup
-user, token, err := core.Auth.Signup(auth.SignupRequest{
-    Email:    "user@example.com",
-    Password: "password",
-    Custom:   map[string]any{"name": "John"},
-})
-
-// Login
-user, token, err := core.Auth.Login(auth.LoginRequest{
-    Email:    "user@example.com",
-    Password: "password",
-})
-```
-
-### 💾 Database
-Unified database interface supporting multiple database systems.
-
-**Currently Supported:**
-- ✅ MongoDB
-- ✅ PostgreSQL
-
-**Coming Soon:**
-- 🔜 MySQL
-
-```go
-// Works the same across all database types
-id, err := core.Mongo.InsertOne("collection", document)
-results, err := core.Mongo.Find("collection", filter)
-```
-
-### ⚙️ Environment Variables
-Automatic `.env` file loading with type-safe access.
-
-```env
-MONGODB_CONNECTION_URL=mongodb://localhost:27017
-AUTH_SECRET=your-secret-key
-PORT=8080
-```
-
-```go
-core.Env.MONGODB_CONNECTION_URL  // Automatically loaded
-```
-
-## 🔌 Framework Integration
-
-CoreGo is designed to work seamlessly with any Go web framework:
-
-- 🍸 **[Gin](./docs/gin-integration.md)** - Example with Gin Web Framework
-- 🎵 **Echo** - Coming soon
-- ⚡ **Fiber** - Coming soon
-- 🦁 **Chi** - Coming soon
-
-## 📚 Documentation
-
-- 🔐 **[Authentication Guide](./docs/authentication.md)** - Complete auth system documentation
-- 💾 **[Database Operations](./docs/database.md)** - Database usage and examples
-- ⚙️ **[Environment Variables](./docs/environment.md)** - Environment configuration
-- 📖 **[API Reference](./docs/api-reference.md)** - Complete API documentation
-
-## ⚡ Configuration
-
-CoreGo uses a simple configuration structure:
-
-```go
-type Config struct {
-    Mongo *database.MongoConfig  // Database configuration
-    Auth  *auth.Config            // Authentication configuration
-}
-```
-
-✨ Auto-configuration from environment variables:
-- ✅ If `MONGODB_CONNECTION_URL` is set, MongoDB connects automatically
-- ✅ No manual configuration needed for basic setup
-
-## 📁 Project Structure
-
-```
-CoreGo/
-├── auth/           # Authentication module
-├── database/       # Database adapters
-├── env/            # Environment management
-├── docs/           # Documentation
-└── test/           # Examples and tests
-```
-
-## 🔒 Security
-
-- 🔐 Passwords hashed with bcrypt
-- 🎫 JWT tokens with configurable expiry
-- 🔑 Environment-based secrets
-- ✅ Secure by default
-
-## 💡 Examples
-
-Check out the [test/main.go](test/main.go) for a complete working example with:
-- ✅ Full authentication flow
-- 🔒 Protected routes
-- 💾 Database operations
-- 👤 Custom user data
-
-Run the example:
 ```bash
-cd test
-go run main.go
+go run .
+
+# 1. Sign up; copy the token from the response.
+curl -s -X POST localhost:8080/auth/signup -H 'Content-Type: application/json' \
+  -d '{"name":"Ada Lovelace","email":"ada@example.com","password":"analytical-engine"}'
+# {"user":{...,"name":"Ada Lovelace",...},"token":"<token>","expires_at":"...","verification_required":false}
+
+# 2. The protected route rejects anonymous requests.
+curl -s localhost:8080/api/hello
+# {"error":"Missing session token."}
+
+# 3. With the token it greets you.
+curl -s localhost:8080/api/hello -H "Authorization: Bearer <token>"
+# {"hello":"Ada Lovelace"}
 ```
 
-## 🗺️ Roadmap
+## Configure with .env
 
-- [x] MongoDB support
-- [x] JWT authentication
-- [x] User management
-- [x] PostgreSQL support
-- [ ] MySQL support
-- [ ] Redis caching
-- [ ] Role-based access control (RBAC)
-- [ ] OAuth providers
-- [ ] Session management
+Everything common can be switched on without touching the code. A local
+development `.env` that stores users in PostgreSQL, requires verified
+email addresses and prints the verification links to the console:
 
-## 🤝 Contributing
+```dotenv
+POSTGRES_CONNECTION_URL=postgres://app:secret@localhost:5432/myapp
+COREGO_REQUIRE_VERIFIED_EMAIL=true
+COREGO_MAIL=log            # development only; set SMTP_* (and COREGO_MAIL=smtp) in production
+# COREGO_AUTH_COOKIE=true          also set the HttpOnly session cookie
+# COREGO_AUTH_TABLE_PREFIX=myapp_  auth tables become myapp_users, myapp_sessions, ...
+```
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+`corego.New` logs what it resolved, for example
+`corego: auth ready store=postgres table_prefix=corego_ base_path=/auth mail=log require_verified_email=true cookie=false`.
+Every variable is listed in [docs/environment.md](docs/environment.md)
+and in [.env.example](.env.example).
 
-## 📄 License
+## Packages
 
-MIT License - see [LICENSE](LICENSE) for details
+| Import path | What it is |
+| --- | --- |
+| `github.com/berkkaradalan/CoreGo` | The facade: `corego.New`, `Core.Server`, `Core.RequireAuth`, `Core.OptionalAuth`, `Core.Run`. |
+| `github.com/berkkaradalan/CoreGo/web` | The web framework: router, groups, middleware, `Context`, errors, CORS, rate limiting. |
+| `github.com/berkkaradalan/CoreGo/auth` | The auth service, its models and errors, `MustUser`, the memory store and the default mailer. |
+| `github.com/berkkaradalan/CoreGo/auth/authhttp` | The auth HTTP routes and the `RequireAuth` and `OptionalAuth` middleware. |
+| `github.com/berkkaradalan/CoreGo/auth/mongostore` | MongoDB `auth.Store`. |
+| `github.com/berkkaradalan/CoreGo/auth/pgstore` | PostgreSQL `auth.Store` with migrations. |
+| `github.com/berkkaradalan/CoreGo/database` | MongoDB and PostgreSQL connections and helpers. |
+| `github.com/berkkaradalan/CoreGo/mail` | Email senders: SMTP, log, capture. |
+| `github.com/berkkaradalan/CoreGo/env` | `.env` and environment loading with typed getters. |
 
-## 👨‍💻 Author
+## Documentation
 
-**Berk Karadalan** - [GitHub](https://github.com/berkkaradalan)
+- [Getting started](docs/getting-started.md): hello world, then recipes
+  for adding endpoints, protecting routes, storing data, sending email,
+  browser frontends and deploying.
+- [Documentation index](docs/index.md): every page, and where to find
+  what.
+- [API reference](docs/api-reference.md): every exported identifier.
+- [Migrating from 0.1](docs/migrating-from-0.1.md) and the
+  [changelog](CHANGELOG.md).
+- [Quickstart example](examples/quickstart/README.md): a runnable app
+  with a recorded curl session.
 
-## 💬 Support
+## Status
 
-- 📚 [Documentation](./docs/)
-- 🐛 [Issues](https://github.com/berkkaradalan/CoreGo/issues)
-- 💭 [Discussions](https://github.com/berkkaradalan/CoreGo/discussions)
+CoreGo **0.2.0** is a complete rewrite of 0.1 with a new, stable-minded
+API (see the [migration guide](docs/migrating-from-0.1.md)). It is
+pre-1.0: minor releases may still change the API, and every change is
+recorded in the [changelog](CHANGELOG.md).
+
+Not available yet (planned, see the [roadmap](ROADMAP.md)): social sign-in
+(Google, Apple, Facebook, GitHub, Microsoft), two-factor authentication,
+organizations and teams, role-based access control, magic links and email
+one-time codes, Redis-backed rate limiting and MySQL.
+
+## Contributing
+
+Contributions are welcome. The project rules, in short (the full list is
+in [AGENTS.md](AGENTS.md)):
+
+- English only in code, comments, tests and docs.
+- Do not port or copy code from other libraries.
+- Every change ships with tests, edge cases included; `go test ./...` and
+  `go test -race ./...` stay green, `gofmt -l .` stays empty.
+- Documentation ships with the change: update the affected page and
+  [docs/api-reference.md](docs/api-reference.md) in the same pull request.
+
+How to run the test suite, including the opt-in database integration
+tests, is described in [docs/testing.md](docs/testing.md).
+
+## License
+
+MIT, see [LICENSE](LICENSE).
