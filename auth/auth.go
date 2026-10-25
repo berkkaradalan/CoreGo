@@ -1,136 +1,91 @@
 package auth
 
 import (
-	"errors"
+	"context"
+	"fmt"
+	"log/slog"
 	"time"
-
-	"github.com/berkkaradalan/CoreGo/database"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-type Manager struct {
-	config 	*Config
-	db 		*database.MongoDB
+// Auth is the CoreGo authentication service. It coordinates users,
+// credential accounts, sessions and verification tokens on top of a
+// Store and is safe for concurrent use.
+//
+// Construct it with New. All methods take a context as their first
+// argument and return one of the package sentinel errors on failure;
+// compare with errors.Is. Call Shutdown before the process exits so
+// emails that are still being delivered in the background are not
+// lost.
+type Auth struct {
+	cfg   Config
+	store Store
+
+	// now supplies the current time. It is a field so tests can swap in
+	// a deterministic clock; production instances use utcNow.
+	now func() time.Time
+
+	// deliveries tracks background email jobs for Shutdown and bounds
+	// them to Config.MaxPendingEmails.
+	deliveries inflight
 }
 
-func New(config *Config, db *database.MongoDB) (*Manager, error) {
-	if config.Secret == "" {
-		return nil, errors.New("auth secret is required")
+// New creates an Auth service backed by store.
+//
+// Zero-value Config fields are replaced by the package defaults (see
+// the Default* constants). A nil store, a negative duration, a
+// negative MinPasswordLength or a negative MaxPendingEmails yields
+// ErrInvalidConfig. Enabling
+// RequireVerifiedEmail without a Mailer is allowed but logged as a
+// warning, because users then have no way to verify their address.
+func New(cfg Config, store Store) (*Auth, error) {
+	if store == nil {
+		return nil, fmt.Errorf("%w: store must not be nil", ErrInvalidConfig)
 	}
-
-	if config.TokenExpiry == 0 {
-		config.TokenExpiry = 60
-	}
-
-	if config.DatabaseName == "" {
-		config.DatabaseName = "users"
-	}
-
-	return &Manager{
-		config: config,
-		db:		db,
-	}, nil
-}
-
-// Signup creates a new user account
-func (m *Manager) Signup(req SignupRequest) (*User, string, error) {
-	// 1. Validate email and password
-	if req.Email == "" {
-		return nil, "", errors.New("email is required")
-	}
-	if req.Password == "" {
-		return nil, "", errors.New("password is required")
-	}
-
-	// 2. Check if user already exists
-	existingUser, _ := m.GetUserByEmail(req.Email)
-	if existingUser != nil {
-		return nil, "", errors.New("user with this email already exists")
-	}
-
-	// 3. Hash password
-	hashedPassword, err := HashPassword(req.Password)
-	if err != nil {
-		return nil, "", errors.New("failed to hash password")
-	}
-
-	// 4. Create user
-	user := &User{
-		Email:     req.Email,
-		Password:  hashedPassword,
-		Custom:    req.Custom,
-		CreatedAt: time.Now(),
-	}
-
-	// 5. Save to database
-	userID, err := m.db.InsertOne(m.config.DatabaseName, user)
-	if err != nil {
-		return nil, "", errors.New("failed to create user")
-	}
-
-	user.ID = userID
-
-	// 6. Generate token
-	token, err := m.GenerateToken(userID)
-	if err != nil {
-		return nil, "", errors.New("failed to generate token")
-	}
-
-	return user, token, nil
-}
-
-// Login authenticates a user
-func (m *Manager) Login(req LoginRequest) (*User, string, error) {
-	// 1. Validate input
-	if req.Email == "" || req.Password == "" {
-		return nil, "", errors.New("email and password are required")
-	}
-
-	// 2. Find user by email
-	user, err := m.GetUserByEmail(req.Email)
-	if err != nil {
-		return nil, "", errors.New("invalid credentials")
-	}
-
-	// 3. Verify password
-	if !VerifyPassword(user.Password, req.Password) {
-		return nil, "", errors.New("invalid credentials")
-	}
-
-	// 4. Generate token
-	token, err := m.GenerateToken(user.ID)
-	if err != nil {
-		return nil, "", errors.New("failed to generate token")
-	}
-
-	return user, token, nil
-}
-
-// GetUserByEmail finds a user by email
-func (m *Manager) GetUserByEmail(email string) (*User, error) {
-	users, err := m.db.Find(m.config.DatabaseName, map[string]any{"email": email})
-	if err != nil {
+	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	a := &Auth{
+		cfg:   cfg.withDefaults(),
+		store: store,
+		now:   utcNow,
+	}
+	if a.cfg.RequireVerifiedEmail && a.cfg.Mailer == nil {
+		a.logger().Warn("auth: RequireVerifiedEmail is enabled but no Mailer is configured; users cannot verify their email address and will not be able to sign in")
+	}
+	return a, nil
+}
 
-	if len(users) == 0 {
-		return nil, errors.New("user not found")
-	}
+// utcNow is the default clock of the service: the current time in UTC,
+// so timestamps never carry the local offset of the server (for example
+// in JSON responses) regardless of the store.
+func utcNow() time.Time {
+	return time.Now().UTC()
+}
 
-	user := &User{}
-	// Convert map to User struct
-	if id, ok := users[0]["_id"].(primitive.ObjectID); ok {
-		user.ID = id.Hex()
-	}
-	if email, ok := users[0]["email"].(string); ok {
-		user.Email = email
-	}
-	if password, ok := users[0]["password"].(string); ok {
-		user.Password = password
-	}
-	if custom, ok := users[0]["custom"].(map[string]interface{}); ok {
-		user.Custom = custom
-	}
+// Shutdown waits until every email that is being delivered in the
+// background has been handed to the mailer (successfully or not). It
+// returns nil once nothing is in flight, or ctx.Err() when ctx is done
+// first; in that case the remaining deliveries keep running.
+//
+// Shutdown does not stop the service: deliveries started while it
+// waits are waited for as well, and the service stays usable
+// afterwards. Call it after the HTTP server has stopped accepting
+// requests, typically with a bounded context:
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+//	defer cancel()
+//	if err := svc.Shutdown(ctx); err != nil {
+//		log.Printf("auth: pending emails not delivered: %v", err)
+//	}
+func (a *Auth) Shutdown(ctx context.Context) error {
+	return a.deliveries.wait(ctx)
+}
 
-	return user, nil
+// logger returns the configured logger, falling back to slog.Default()
+// at call time so a default installed after New is honored.
+func (a *Auth) logger() *slog.Logger {
+	if a.cfg.Logger != nil {
+		return a.cfg.Logger
+	}
+	return slog.Default()
 }
