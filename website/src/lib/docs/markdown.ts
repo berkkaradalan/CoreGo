@@ -190,7 +190,7 @@ const HEADING_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
  * rehypeUnwrapHeadingLinks replaces links inside headings with their
  * content. The heading renderer wraps the whole heading in a link to its
  * own anchor, and a link must not contain another link (for example the
- * changelog's "## [0.2.0] - Unreleased", whose version links to a compare
+ * changelog's "## [0.2.0] - 2026-10-26", whose version links to a compare
  * view). The text stays, so the heading ids, computed from the text
  * earlier in the pipeline, do not change.
  */

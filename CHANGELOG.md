@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Before 1.0.0, minor releases may contain breaking changes; they are always
 listed here.
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-10-26
 
 A complete rewrite. Almost every public API changed; the
 [migration guide](docs/migrating-from-0.1.md) shows the before and after
@@ -339,5 +339,5 @@ code for each of them.
 Initial release: JWT authentication on MongoDB with Gin handlers and
 middleware, a MongoDB wrapper and `.env` loading.
 
-[0.2.0]: https://github.com/berkkaradalan/CoreGo/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/berkkaradalan/CoreGo/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/berkkaradalan/CoreGo/releases/tag/v0.1.0

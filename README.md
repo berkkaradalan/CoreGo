@@ -44,7 +44,7 @@ the official MongoDB and PostgreSQL drivers.
 go get github.com/berkkaradalan/CoreGo@v0.2.0
 ```
 
-Go 1.24 or newer. (Until the `v0.2.0` tag is published, use `@main`.)
+Go 1.24 or newer.
 
 ## Hello world
 

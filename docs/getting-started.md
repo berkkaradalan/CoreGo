@@ -27,8 +27,6 @@ go mod init example.com/myapp
 go get github.com/berkkaradalan/CoreGo@v0.2.0
 ```
 
-(Until the `v0.2.0` tag is published, use `@main`.)
-
 ## Hello world
 
 `main.go`:
